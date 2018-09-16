@@ -1,7 +1,7 @@
 # Site settings 配置站点
 title: 's3cunDa'
 description: '写东西的地方'
-keywords: 'ctf的一些东西'
+keywords: 'ctf&coding'
 url: 'https://s3cunDa.github.io' # your host
 
 # nav 中文字符空格：&emsp;
@@ -24,7 +24,7 @@ portraits: '/assets/profile.jpeg' # your portraits image file path
 
 # SNS
 SNS: true
-SNS-icon: #['facebook', 'weibo', 'QQ', 'github', 'Dribbble', 'twitter', 'instagram', 'weixin']
+SNS-icon: ['facebook', 'weibo', 'QQ', 'github', 'Dribbble', 'twitter', 'instagram', 'weixin']
   mail: '895664831@qq.com'
   weixin: 'zwx895664831' # your wechat image file path
   QQ: '895664831' # your QQ image file path
