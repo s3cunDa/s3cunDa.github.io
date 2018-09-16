@@ -1,34 +1,36 @@
-﻿# xman re部分writeup
-
-标签（空格分隔）： re
+﻿---
+title: xman re 题目
+date: 2018-08-05 00:00:00
+categories:
+- CTF/Re
+tags:  Re
 ---
-
-***1.re0***
+##re0
 题目开头的代码可以看出对judge函数进行了加密
-
+```
 
         for ( i = 0; i <= 181; ++i )
       {
         envp = (const char **)(*((unsigned __int8 *)judge + i) ^ 0xCu);
         *((_BYTE *)judge + i) ^= 0xCu;
       }
-
+```
 在data段看到加密后的judge函数为乱码
 可以看到judge函数的开头为0x600b00结尾为0x600bb5
 但是在函数定义阶段定义的结尾为0x600b05
 右键judge函数将其结尾改为0x600bb5
 输入python脚本，将其解密（异或0xc）
-
+```
     judge=0x600B00
     for i in range(182):
         addr=0x600B00+i
         byte=get_bytes(addr,1)
         byte=ord(byte)^0xC
         patch_byte(addr,byte)
-        
+```       
 解密后反编译，发现ida反编译后代码较混乱
 回到textview视图，将judge函数取消定义，而后重新定义，可以看到judge函数的反编译代码：
-
+```
     __int64 __fastcall judge(__int64 a1)
     {
       char v2; // [rsp+8h] [rbp-20h]
@@ -67,13 +69,13 @@
         ;
       return nullsub_1();
     }
-
+```
 将v2至v5转换为字符类型，可得字符串：
 fmcd\x7fk7d;V\x60;np
 其中\x7f与\x60为不可显示字符（对应v6 127以及 v12 96）
 可以看到后续运算将其与其下标进行异或运算
 可写出解密脚本：
-
+```C
     flag_enc="fmcd\x7fk7d;V\x60;np"
     flag=""
     for i in range(len(flag_enc)):
@@ -81,13 +83,13 @@ fmcd\x7fk7d;V\x60;np
         flag+=chr(ord(c)^i)
     
     print flag
-    
+```  
 得到flag：
 flag{n1c3_j0b}
-***2.re_1***
+#re1
 后缀名是.exe，运行发现是注册框程序
 对MessageBoxA函数进行xref查询，可以找到关键代码段在0x401720调用messagebox函数，对此函数xref操作，定位至0x401621，向前查阅代码，可以看到在4015e0段判断输入的字符长度是否等于21h
-
+```
     .text:004015E0                 push    ecx
     .text:004015E1                 push    esi
     .text:004015E2                 mov     esi, ecx
@@ -120,8 +122,9 @@ flag{n1c3_j0b}
     .text:00401626                 pop     esi
     .text:00401627                 pop     ecx
     .text:00401628                 retn
+```
 有以上代码可以得到在字符串长度为21h时会进行下一步判断，即调用0x401630处函数，其汇编代码如下：
-
+```
     .text:00401630 sub_401630      proc near               ; CODE XREF: .text:0040160C↑p
     .text:00401630
     .text:00401630 var_1           = byte ptr -1
@@ -170,13 +173,14 @@ flag{n1c3_j0b}
     .text:00401692                 retn    4
     .text:00401692 sub_401630      endp
     .text:00401692
+```
 可以观察到在0x401669处对输入的flag进行判断
 进入od，在对应的代码段设置断点
 输入长度为0x21的任意字符串，单步运行可爆破得flag：
 flag{The-Y3ll0w-turb4ns-Upri$ing}
-***3.evr***
+##evr
 拖入ida发现main函数不能反编译，显示栈指针有误，对于有误的代码地址alt+k将栈指针修复，得到反汇编后的main函数：
-
+```C
     __int64 __cdecl main_0()
     {
       int v0; // edx
@@ -279,7 +283,7 @@ flag{The-Y3ll0w-turb4ns-Upri$ing}
       LODWORD(v1) = 0;
       return v1;
     }
-    
+```    
 可以看到程序首先对输入的名字进行判断，成功后才会对输入的flag进行判断，但是名字的正确与否不会影响到flag的计算过程。
 很明显的，flag长度为35
 只对对于输入的flag判断的函数进行分析，可以看到首先将输入的flag异或0x76后存入另一个内存区域，而后对于其副本进行加解密操作。
@@ -299,8 +303,9 @@ flag{The-Y3ll0w-turb4ns-Upri$ing}
     }
 可以看到第一次将前七个字符加密运算
 考虑最后的比较函数
-
-     if ( sub_8C1447((int)&my_flag1, (int)&unk_8CB0DC) )
+```    
+ if ( sub_8C1447((int)&my_flag1, (int)&unk_8CB0DC) )
+```
 查看内存区域0x8cb0cc,将其转化为数组（d建）右键改变大小，shift+edump出内容，选择第五个参数，即c无符号字符型得到内容：
  30,  21,   2,  16,  13,  72,  72, 111, 221, 221, 
    72, 100,  99, 215,  46,  44, 254, 106, 109,  42, 
@@ -308,15 +313,16 @@ flag{The-Y3ll0w-turb4ns-Upri$ing}
    23,  70,  79,  20,  11
 而后的加密运算与第一次类似，不再赘述
 最后将前几次的运算结果合并：
-
+```C
     for ( i = 0; i < 7; ++i )
       {
         byte_8CB577[i] = byte_8CB5F0[i];
         byte_8CB57E[i] = byte_8CB670[i];
         byte_8CB585[i] = byte_8CB6F0[i];
       }
+```
 由此可以得到逆向脚本算出flag
-
+```python
         flag_enc=[30,  21,   2,  16,  13,  72,  72, 111, 221, 221, 72, 100,  99, 215,  46,  44, 254, 106, 109,  42, 242, 111, 154,  77, 139,  75,  10, 138,  79,  69,  23,  70,  79,  20,  11];
     
     flag=""
@@ -350,13 +356,14 @@ flag{The-Y3ll0w-turb4ns-Upri$ing}
     for i in range(7):
         flag+=chr(flag_enc[i+28]^0x76)
     print flag
+```
 得到flag：
 hctf{>>D55_CH0CK3R_B0o0M!-9193a09b}
-***4.simplecheck***
+##simplecheck
 
 
 后缀名为apk，解压得到java文件，将classes.dex拖入java反编译器反编译得到源码：
-
+```java
     package com.a.simplecheck;
     
     public class a
@@ -398,12 +405,12 @@ hctf{>>D55_CH0CK3R_B0o0M!-9193a09b}
         return true;
       }
     }
-
+```
 首先判断输入参数是否长度与b长度相等，若不相等则返回错误。
 而后将输入的参数复制到arrayOfInt中I（下标从1开始，未对齐）
 而后进行一个一元二次方程组的运算
 爆破可得flag：
-
+```python
     from string import printable
     
     a = [0, 146527998, 205327308, 94243885, 138810487, 408218567, 77866117, 71548549, 563255818, 559010506, 449018203, 576200653, 307283021, 467607947, 314806739, 341420795, 341420795, 469998524, 417733494, 342206934, 392460324, 382290309, 185532945, 364788505, 210058699, 198137551, 360748557, 440064477, 319861317, 676258995, 389214123, 829768461, 534844356, 427514172, 864054312]
@@ -422,38 +429,41 @@ hctf{>>D55_CH0CK3R_B0o0M!-9193a09b}
             flag += i
             break
     print flag
+```
 flag：
 flag{MAth_i&_GOOd_DON7_90V_7hInK?}
-***5.hide***
+##hide
 文件加了壳，不能直接丢进ida，需要手动脱壳
 命令如下：
-
+```bash
    
 
      sudo dd if=/proc/\$(pidof hide)/mem of=hide_dump1 skip=4194304  bs=1c count=827392
     sudo dd if=/proc/$(pidof hide)/mem of=hide_dump2 skip=7110656  bs=1c count=20480
     cat hide_dump1 hide_dump2 >hide_dump
-
+```
 得到的hide_dump文件丢入ida可以观察到反编译后代码
 查找字符串可以看到“enter the flag”被引用了两次
 进入第一个函数查看
 
-   
+```C  
 
      if ( (unsigned int)sub_4009AE(&v6) != 0 )
       {
         v0 = "You are right\n";
         sub_43E9B0(1LL, "You are right\n", 14LL);
       }
+```
 查看函数4009ae
-
+```
     _BOOL8 __fastcall sub_4009AE(__int64 a1)
     {
       return (unsigned int)sub_400360(a1, "qwb{this_is_wrong_flag}") == 0;
     }
+```
 输入flag测试发现真的是假的flag
 于是找到第二个引用该字符串的函数
-
+```
     LOAD:00000000004C8EC2                 mov     rsi, offset aEnterTheFlag ; "Enter the flag:\n"
     LOAD:00000000004C8EC9                 mov     rdx, 10h
     LOAD:00000000004C8ED0                 xor     eax, eax
@@ -466,12 +476,13 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
     LOAD:00000000004C8EE9                 syscall                 ; LINUX - sys_read
     LOAD:00000000004C8EEB                 cmp     eax, 0
     LOAD:00000000004C8EEE                 jle     loc_4C8FA9
+```
 可以看到这里同样也引用了该字符串
 初步猜测此处为正确的程序执行流
 定义函数发现该处定义不了函数因为堆栈以及一些ida反编译因素
 于是在00000000004C8EF4处定义函数
 反编译代码如下：
-
+```C
     signed __int64 sub_4C8EF4()
     {
       _BYTE *v0; // rdi
@@ -506,9 +517,10 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
       __asm { syscall; LINUX - sys_exit }
       return result;
     }
+```
 可以看到其加密的方式，三次tea加密以及三次xor
 解密脚本：
-
+```python
     #coding=utf-8
     import struct
     import string
@@ -636,17 +648,18 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
     print block('12345678').encode('hex')
     des1 = '5b90ef3f91b58fe6'.decode('hex')
     print re_all(bytearray(des))
-***6.magic***
+```
+##magic
 真的看不懂。。
 [http://www.sohu.com/a/236355836_354899][1]
 这里有一篇wp跟着下来还是不是很清楚
 
 
   [1]: http://www.sohu.com/a/236355836_354899
-***7.re2***
+##re2
 丢进ida，32位程序
 分析一下main函数
-
+```C
     int __cdecl main(int argc, const char **argv, const char **envp)
     {
       int result; // eax
@@ -677,9 +690,9 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
       }
       return result;
     }
-
+```
 逻辑很清晰，进入wrongflag函数：
-
+```C
     signed int __cdecl wrongflag_0(const char *flag, _DWORD *a2)
     {
       signed int result; // eax
@@ -706,10 +719,11 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
       }
       return result;
     }
+```
 假的flag，常规套路
 于是乎又回到main函数
 发现在判断长度是否为19后调用了一个神奇的函数，初步考虑其为关键函数
-
+```C
     int wat()
     {
       HMODULE v0; // eax
@@ -728,9 +742,10 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
       dword_40C9BD = (char *)sub_401080 - (char *)lpAddress - 5;
       return sub_4010D0();
     }
+```
 本题可以看到在此函数里对于函数本题开启了写的保护权限，并且在函数后半段对写的指令以及地址进行了赋值，而后调用了sub4010d
 将其命名为addr
-
+```
     .data:0040C9BB                 db    0
     .data:0040C9BC jmp_near        db 0                    ; DATA XREF: sub_4010D0+3A↑o
     .data:0040C9BC                                         ; wat-2B↑w
@@ -746,9 +761,10 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
       WriteProcessMemory(hProcess, proc_addr_2, &jmp_near, 5u, 0);
       return VirtualProtectEx(hProcess, proc_addr_2, 5u, flOldProtect, &v1);
     }
+```
 返回之后main函数跳到hook上
 进入401080函数，在addr处找到了关键函数suspect
-
+```C
     signed int __cdecl suspect(char *dst, signed int len)
     {
       char idx; // al
@@ -789,9 +805,10 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
       }
       return 0;
     }
+```
 最后的`while ( enc[v5] == dst[v5] )`可以看出enc为密文（0x40a030为其地址）
 写出解密脚本：
-
+```python
     enc = [97, 106, 121, 103, 107, 70, 109, 46, 127, 95, 126, 45, 83, 86, 123, 56, 109, 76, 110,0]
     flag  = []
     enc[18] ^=0x13
@@ -820,6 +837,7 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
     for i in flag:
     	new += i
     print new
+```
 运行得flag：
 flag{Ho0k_w1th_Fun}（第一位无解，猜测得到f    lol）
 ps：hook技巧并不会，经pizza大佬指点后豁然开朗
