@@ -1,8 +1,13 @@
-﻿# ret2dl_resolve 学习
-
-标签（空格分隔）： pwn 栈 ret2dlresolve
-
+﻿---
+title: ret2dlrsvl
+date: 2018-08-28 00:00:00
+categories:
+- CTF/Pwn
+tags:  Pwn
 ---
+# ret2dl_resolve 学习
+
+
 
 补习了一下栈的知识，看了一下最难的利用方式，发现还是有好多要学习的地方
 ret2dlresolve主要就是在没有libc的时候，利用动态延迟绑定来进行利用的一种手法
@@ -19,7 +24,7 @@ ret2dlresolve主要就是在没有libc的时候，利用动态延迟绑定来进
 4.伪造sym的内容，使name落在可控地址内
 5.伪造name为任意库函数，如system
 源程序里栈的溢出字节很小，所以不能把整个payload写进去
-
+```
     ssize_t vuln()
     {
       char buf; // [esp+Ch] [ebp-6Ch]
@@ -27,7 +32,7 @@ ret2dlresolve主要就是在没有libc的时候，利用动态延迟绑定来进
       setbuf(stdin, &buf);
       return read(0, &buf, 0x100u);
     }
-
+```
 这里只能溢出0x30字节，所以需要栈转移（stack pivot）这一手法
 目的是将栈地址搞到一个可控的地址去，一般是堆或者bss段，涉及到的指令（gadget）是pop ebp ret以及 leave ret（pop esp当然也可以，不过很难找）
 leave这一指令作用就是：mov esp ebp；pop ebp
@@ -40,7 +45,7 @@ pop ebp之后在执行leave就实现栈转移了
 在构造的时候注意一些字段需要对齐
 具体的构造方式见exp
 exp：
-
+```python
     from pwn import *
     context.log_level = 'debug'
     io = process('./bof')
@@ -111,7 +116,7 @@ exp：
     io.sendline(payload2)
     
     io.interactive()
-
+```
 [参考链接][2]
 
 

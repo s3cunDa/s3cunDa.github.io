@@ -1,7 +1,14 @@
-***offbynull + unsortedbinattack + fastbin attack + main_arena ataack***
+---
+title: fastbinattack的一种花式玩法
+date: 2018-08-19 00:00:00
+categories:
+- CTF/Pwn
+tags:  Pwn
+---
+##offbynull + unsortedbinattack + fastbin attack + main_arena attack
 这个题目就是我一星期没睡好觉的罪魁祸首
 在七夕节这天我终于弄懂了！！！！！！！
-
+```
     while ( 1 )
       {
         choices();
@@ -21,9 +28,10 @@
             puts("invalid~");
             break;
         }
+```
 标准的选单题目，但是没有edit函数
 做的很绝，delete的时候都清空了，add时先把内存区域清零，而且只能申请0x80以上大小的堆块
-
+```
     unsigned __int64 add()
     {
       int v1; // [rsp+0h] [rbp-10h]
@@ -61,8 +69,9 @@
       }
       return __readfsqword(0x28u) ^ v3;
     }
+```
 ——————————————————————————————————————————————————————
-
+```
     unsigned __int64 sub_D73()
     {
       int v1; // [rsp+4h] [rbp-Ch]
@@ -83,9 +92,9 @@
       }
       return __readfsqword(0x28u) ^ v2;
     }
-
+```
 主要漏洞点就一个
-
+```
     unsigned __int64 __fastcall suspect(__int64 a1, unsigned int a2)
     {
       char buf; // [rsp+13h] [rbp-Dh]
@@ -111,6 +120,7 @@
       *(_BYTE *)(i + a1) = 0;                       // off by null
       return __readfsqword(0x28u) ^ v5;
     }
+```
 这里有一个offbynull漏洞
 常规的方法肯定是用不了了，主体的思路就是leak地址，改写maxfast值，而后劫持topchunk指针，改写mallochook，getshell
 1.leak

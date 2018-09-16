@@ -1,6 +1,11 @@
-#qctf noleak
-
-**house of roman** 
+---
+title: noleak
+date: 2018-08-16 00:00:00
+categories:
+- CTF/Pwn
+tags:  Pwn
+---
+##house of roman
 题目为xman选拔赛 Noleak 
 当时没做出来，今天有时间看了下wp 
 题目主要是利用了aslr的低地址随机化程度不高，利用局部写可以得到一些我们想要的值， 
@@ -64,7 +69,7 @@ double free即可getshell
 
 exp:
 
-```
+```python
 from pwn import *
 context.log_level = 'debug'
 context.arch = "amd64"
