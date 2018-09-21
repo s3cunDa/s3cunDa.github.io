@@ -17,7 +17,9 @@ tags: Kernel
 
 ### 内核安装与编译
 
-```https://mirrors.edge.kernel.org/pub/linux/kernel```
+```
+https://mirrors.edge.kernel.org/pub/linux/kernel
+```
 
 到这个网站上找一个内核版本，wget下来（我这里是用的4.4.11）
 
