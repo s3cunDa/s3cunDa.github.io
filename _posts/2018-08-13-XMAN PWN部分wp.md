@@ -5,7 +5,7 @@ categories:
 - CTF/Pwn
 tags:  Pwn
 ---
-##smallest
+## smallest
 ```
     start           proc near               ; DATA XREF: LOAD:0000000000400018↑o
     .text:00000000004000B0                 xor     rax, rax
@@ -94,7 +94,7 @@ exp(wiki)：```
     sh.send(sigreturn)
     sh.interactive()
 ```
-##note
+## note
 经典的表单题目，丢进ida查看反编译代码：
 ```
     void __fastcall main(__int64 a1, char **a2, char **a3)
@@ -228,7 +228,7 @@ exp：
     p.sendline('/bin/sh')
     p.interactive()
 ```
-##freenote
+## freenote
 ```
     _QWORD *init_env()
     {
@@ -433,7 +433,7 @@ count（0<count<max)+flag+len+got_free+padding(len 0x10)+binsh_addr
     io.interactive()
 ```
 
-##offbyone
+## offbyone
 标准的表单输入程序，漏洞点在edit函数：
 ```
     unsigned __int64 edit()
@@ -563,7 +563,7 @@ exp：
 这里需要注意的是，我们在利用fd指针寻找伪造堆块时，要保证堆块的头部信息也就是size字段要与申请的大小相同，在malloc附近由于未初始化都是0，借助上一个地址的信息我们可以得到我们需要的大小，也就是说我们修改的地址是在malloc_hook - 0x10 -3的位置（可以自己手动调试），libc的版本不同的话我们构造的head大小也不同。
 同样需要提及的一点是onegadget需要一些条件的满足，我们需要逐个尝试才能保证其准确性。
 
-##canary
+## canary
 程序开了canary和nx
 这道题主要就是考察如何泄露或者改写canary
 归根结底就是怎么在内存里面找到canary
