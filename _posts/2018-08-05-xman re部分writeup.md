@@ -5,7 +5,7 @@ categories:
 - CTF/Re
 tags:  Re
 ---
-##re0
+## re0
 题目开头的代码可以看出对judge函数进行了加密
 ```
 
@@ -86,7 +86,7 @@ fmcd\x7fk7d;V\x60;np
 ```  
 得到flag：
 flag{n1c3_j0b}
-#re1
+# re1
 后缀名是.exe，运行发现是注册框程序
 对MessageBoxA函数进行xref查询，可以找到关键代码段在0x401720调用messagebox函数，对此函数xref操作，定位至0x401621，向前查阅代码，可以看到在4015e0段判断输入的字符长度是否等于21h
 ```
@@ -180,7 +180,7 @@ flag{n1c3_j0b}
 flag{The-Y3ll0w-turb4ns-Upri$ing}
 ##evr
 拖入ida发现main函数不能反编译，显示栈指针有误，对于有误的代码地址alt+k将栈指针修复，得到反汇编后的main函数：
-```C
+```c
     __int64 __cdecl main_0()
     {
       int v0; // edx
@@ -359,7 +359,7 @@ flag{The-Y3ll0w-turb4ns-Upri$ing}
 ```
 得到flag：
 hctf{>>D55_CH0CK3R_B0o0M!-9193a09b}
-##simplecheck
+## simplecheck
 
 
 后缀名为apk，解压得到java文件，将classes.dex拖入java反编译器反编译得到源码：
@@ -649,14 +649,14 @@ flag{MAth_i&_GOOd_DON7_90V_7hInK?}
     des1 = '5b90ef3f91b58fe6'.decode('hex')
     print re_all(bytearray(des))
 ```
-##magic
+## magic
 真的看不懂。。
 [http://www.sohu.com/a/236355836_354899][1]
 这里有一篇wp跟着下来还是不是很清楚
 
 
   [1]: http://www.sohu.com/a/236355836_354899
-##re2
+## re2
 丢进ida，32位程序
 分析一下main函数
 ```C
