@@ -44,7 +44,7 @@ int __fastcall plot(int x, int y, char c)
 刚开始的思路是往代码段里面写shellcode。。。我他妈真是疯了
 
 后来才反应过来如果输入的矩阵大小很大的时候就会调用mmap，分配到一个离libc很近的堆地址
-
+```
     0x555555554000     0x555555555000 r-xp     1000 0      /pwn/train/bigpicture
     0x555555755000     0x555555756000 r--p     1000 1000   /pwn/train/bigpicture
     0x555555756000     0x555555757000 rw-p     1000 2000   /pwn/train/bigpicture
@@ -61,6 +61,7 @@ int __fastcall plot(int x, int y, char c)
     0x7ffff7ffd000     0x7ffff7ffe000 rw-p     1000 26000  /lib/x86_64-linux-gnu/ld-2.23.so
     0x7ffff7ffe000     0x7ffff7fff000 rw-p     1000 0      
     0x7ffffffde000     0x7ffffffff000 rw-p    21000 0      [stack]
+```
 然后libc里边的函数偏移和我们申请的堆地址偏移固定，算出来固定的偏移，一个字节一个字节的写进去就好了
 
 ### leak地址
