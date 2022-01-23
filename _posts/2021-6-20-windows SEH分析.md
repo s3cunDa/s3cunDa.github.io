@@ -2,7 +2,7 @@
 
 与linux不同，windows的函数调用栈中存储了不止栈底指针（saved ebp）以及返回地址、局部变量、canary这几样，windows在栈中存放了许多的私货，这其中就包括了seh。
 
-![igor1_seh3_stack_layout](./asset/igor1_seh3_stack_layout.gif)
+![igor1_seh3_stack_layout](../assets/post/igor1_seh3_stack_layout.gif)
 
 ### SEH
 
@@ -128,7 +128,7 @@ typedef struct _EXCEPTION_REGISTRATION_RECORD{
 
 其中，TEB存放于fs段开头位置，fs[0]即为TIB，TIB第一个字段就保存了SEH链表的头部指针。而SEH链表中其他的节点存储在栈中。
 
-![SEH链表](./asset/SEH链表.png)
+![SEH链表](../assets/post/SEH链表.png)
 
 ### 当异常发生后，程序都干了什么？
 
@@ -354,7 +354,7 @@ struct _EH4_SCOPETABLE_RECORD {
 };
 ```
 
-![windows栈帧](./asset/windows栈帧.jpg)
+![windows栈帧](../assets/post/windows栈帧.jpg)
 
 在函数开始时，回先保存上个函数的ebp，然后将try level、加密后的scope table、sehhandler、seh next、异常指针、esp指针以及gs压栈，gs就是类似于canary（security cookie xor ebp）的东西,。
 

@@ -1123,13 +1123,13 @@ contract AlienCodex is Ownable {
 
 合约引入了ownable，这样合约中就多了个owner变量，这个变量经过查询是在slot 0中。
 
-![image-20211025172325504](./asset/ethernaut1.png)
+![image-20211025172325504](../assets/post/ethernaut1.png)
 
 前十六个字节是contact
 
-![image-20211025172556061](./asset/ethernaut2.png)
+![image-20211025172556061](../assets/post/ethernaut2.png)
 
-![image-20211025172620802](./asset/ethernaut3.png)
+![image-20211025172620802](../assets/post/ethernaut3.png)
 
 可以看到调用完makecontact就变成1了。
 

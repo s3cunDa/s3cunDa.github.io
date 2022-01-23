@@ -15,9 +15,9 @@ pe文件与elf文件差不多，也分为几类具体来说如下表：
 
 pe文件格式如下图：
 
-![pe文件格式](./asset/pe文件格式.png)
+![pe文件格式](../assets/post/pe文件格式.png)
 
-![image-20210714161235160](/Users/secundanirn/Library/Application Support/typora-user-images/image-20210714161235160.png)
+![image-20210714161235160](../assets/post/image-20210714161235160.png)
 
 头部信息相对于elf文件内容更多一些，从cos头到节区头都是头部信息，映射关系与elf大同小异。
 
