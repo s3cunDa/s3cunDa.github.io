@@ -1,33 +1,41 @@
-var sectionHeight = function() {
-  var total    = $(window).height(),
-      $section = $('section').css('height','auto');
+var leftTab = document.getElementById('left-tab'),
+    rightTab = document.getElementById('right-tab');
 
-  if ($section.outerHeight(true) < total) {
-    var margin = $section.outerHeight(true) - $section.height();
-    $section.height(total - margin - 20);
-  } else {
-    $section.css('height','auto');
-  }
+// 垃圾方法，该方法必须等页面加载玩才有效
+// window.onload = function(){
+//   btn[0].onmouseover=function() {
+//     leftTab.style.display="block";
+//     leftTab.setAttribute("class","rotateInUpLeft self-animated");
+//   }
+//   btn[0].onmouseout=function() {
+//     leftTab.setAttribute("class","rotateOutDownLeft self-animated");
+//     // leftTab.style.display="none";
+//   }
+//   btn[1].onmouseover=function() {
+//     rightTab.style.display="block";
+//     rightTab.setAttribute("class","rotateInUpRight self-animated");
+//   }
+//   btn[1].onmouseout=function() {
+//     rightTab.setAttribute("class","rotateOutDownRight self-animated");
+//     // leftTab.style.display="none";
+//   }
+//
+// }
+
+function showLeft() {
+  leftTab.style.display="block";
+  leftTab.setAttribute("class","rotateInUpLeft self-animated");
 }
 
-$(window).resize(sectionHeight);
+function goneLeft() {
+  leftTab.setAttribute("class","rotateOutDownLeft self-animated");
+}
 
-$(function() {
-  $("section h1, section h2, section h3").each(function(){
-    $("nav ul").append("<li class='tag-" + this.nodeName.toLowerCase() + "'><a href='#" + $(this).text().toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g,'') + "'>" + $(this).text() + "</a></li>");
-    $(this).attr("id",$(this).text().toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g,''));
-    $("nav ul li:first-child a").parent().addClass("active");
-  });
+function showRight() {
+  rightTab.style.display="block";
+  rightTab.setAttribute("class","rotateInUpRight self-animated");
+}
 
-  $("nav ul li").on("click", "a", function(event) {
-    var position = $($(this).attr("href")).offset().top - 190;
-    $("html, body").animate({scrollTop: position}, 400);
-    $("nav ul li a").parent().removeClass("active");
-    $(this).parent().addClass("active");
-    event.preventDefault();
-  });
-
-  sectionHeight();
-
-  $('img').on('load', sectionHeight);
-});
+function goneRight() {
+  rightTab.setAttribute("class","rotateOutDownRight self-animated");
+}
