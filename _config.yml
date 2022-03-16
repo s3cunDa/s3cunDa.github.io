@@ -1,9 +1,10 @@
+---
 # Site settings 配置站点
-title: 's3cunda's blog'
-description: 's3cunda's blog'
-keywords: 'ctf, blockchain, smart contract'
-url: 'https://s3cunDa.github.io' # your host
-
+title: 'your awesome title'
+description: 'your web description'
+keywords: 'your web keywords, another keywords'
+url: 'https://abc.github.io' # your host
+---
 # nav 中文字符空格：&emsp;
 nav: # 最佳体验 六个标签 且最好每个标签不超过4中文字
   首页: '/'
