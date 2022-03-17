@@ -26,8 +26,6 @@ titles:
 key: page-about
 ---
 
-# About Me
-
 ID: s3cunda
 
 NeSE ctf player, pwn & block chain
