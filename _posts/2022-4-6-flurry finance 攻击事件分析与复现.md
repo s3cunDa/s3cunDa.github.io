@@ -24,7 +24,7 @@ FlurryFinance只采用了部分最具有投资价值defi项目作为投资目标
 
 当用户选择开启rebase选项后，用户的rhotoken在产生收益的过程中会增加，并且保持rhotoken和稳定币的1:1兑换关系。
 
-实现rhotoken价格恒定的底层逻辑是将用户的存款表示为实际存款与Multiplier的乘积。也就是说，rho代币的价格与multipier成直接正相关关系。
+实现rhotoken价格恒定的底层逻辑是将用户的存款表示为实际存款与Multiplier的乘积。也就是说，用户rho代币余额与multipier成直接正相关关系。
 
 ```solidity
     function balanceOf(address account) public view override(ERC20Upgradeable, IERC20Upgradeable) returns (uint256) {
@@ -103,9 +103,9 @@ FlurryFinance只采用了部分最具有投资价值defi项目作为投资目标
 
 用户与FlurryFinance的交互接口为对应的Vault合约，用户的资金也是流向Vault中，并由Vault生成Rho代币。
 
-而rebasing RHOtoken的定价则是由对应的投资策略中的余额进行计算。
+而用于rebasing RHOtoken的Multiplier则是由对应的投资策略中的余额进行计算。
 
-也就是说，价格计算和用户存储资产的地址不一样。
+经过明月师傅的指点，整个的项目逻辑就是用户将稳定币存入对应的vault，对应的策略组从vault中取钱进行投资，根据投资策略所产生的收益计算Multiplier，通过rebase以增发代币数量的方式给用户分配收益。
 
 ## 攻击流程分析
 
