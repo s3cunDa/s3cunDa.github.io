@@ -313,7 +313,7 @@ FlurryFinance只采用了部分最具有投资价值defi项目作为投资目标
 
 分析execute函数逻辑，其实际作用就是将用户指定的swapPair全部换为借款代币，用户的借款数额在execute函数中并没有实际作用。
 
-那么这一套流程下来，实际并没有任何资产转到用户名下，整个的资金流是：vault->goblin->strategy，用户没有直接接手整个流程。
+那么这一套流程下来，实际并没有任何资产转到用户名下，整个的资金流是：Bank->goblin->strategy，用户没有直接接手整个流程。
 
 在本例中，用户传入的calldata只是用于指定进行最后swap的pair地址，calldata并没有使用在其他的外部调用中。
 
