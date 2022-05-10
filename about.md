@@ -28,7 +28,11 @@ key: page-about
 
 ID: s3cunda
 
+NUDT -> XTU -> UACS@IIE
+
 NeSE ctf player, pwn & block chain
+
+Cobo Blockchain Security Engineer Intern
 
 WeChat ID: zmm190308
 
