@@ -2,7 +2,249 @@
 
 ## 事件概述
 
-4月17日，ETH 上稳定币协议 Beanstalk Farm 遭到闪电贷攻击，项目方损失约 8000万美元。Beanstalk 协议中的提案管理合约 GovernanceFacet.emergencyCommit 函数可以立即执行投票通过且提案时间大于一天的提案，执行过程中会以 GovernanceFacet 的身份执行提案合约的 init 函数（delegatecall）。攻击者首先在攻击发生一天前部署设置了一个恶意提案，当发生调用时会将 Beanstalk 协议内的资金转出到攻击合约地址，在攻击发生当天通过闪电贷取得足够多的投票代币使得盖提案通过。由于提案通过时会以 delegatecall 调用对应合约的 init 函数，所以攻击者可以凭借这一漏洞偷走项目内资金。
+4月17日，ETH 上稳定币协议 Beanstalk Farm 遭到闪电贷攻击，项目方损失约 8000万美元。
+
+Beanstalk 协议中的提案管理合约 GovernanceFacet.emergencyCommit 函数可以立即执行投票通过且提案时间大于一天的提案，执行过程中会以 GovernanceFacet 的身份执行提案合约的 init 函数（delegatecall）。
+
+攻击者首先在攻击发生一天前部署设置了一个恶意提案，其初始化函数会将 Beanstalk 协议内的资金转出到攻击合约地址，在攻击发生当天通过闪电贷取得足够多的投票代币使得该提案通过。由于提案通过时会以 delegatecall 调用对应合约的 init 函数，所以攻击者可以凭借这一漏洞偷走项目内资金。
+
+## Beanstalk 项目简介
+
+Beanstalk 是一个算法稳定币项目，每个BeanToken都对应着1USD。Beanstalk 采用 DAO 的形式由社区进行管理和协议升级（该 DAO 称之为 Silo），只要在DAO中质押项目制订的白名单中的代币，任何人都可以成为DAO中的一员，进行项目提案投票以及获得额外的质押奖励。
+
+Silo 白名单包括：
+
+1. Bean：0xDC59ac4FeFa32293A95889Dc396682858d52e5Db
+2. Bean&WETH UniswapPairLP：0x87898263B6C5BABe34b4ec53F22d98430b91e371
+3. BEAN:3CRV Curve LP Tokens：0x3a70DfA7d2262988064A2D051dd47521E43c9BdD
+4. BEAN:LUSD Curve LP Tokens：0xD652c40fBb3f06d6B58Cb9aa9CFF063eE63d465D
+
+用户向协议中质押白名单中的代币会根据不同的计算公式获得对应数量的 Stalk（Silo 治理代币），并且记录用户所拥有的Stalk在当前项目总质押代币中的相应占比。具体计算公式见项目白皮书：https://bean.money/docs/beanstalk.pdf
+
+在用户得到Stalk的同时也会得到对应的roots，计算公式为：roots = totalRoots * stalk / totalStalk ，而后将用户产生的roots累加到rootsSum中。代码如下（0x448d330affa0ad31264c2e6a7b5d2bf579608065）：
+
+```solidity
+    function incrementBalanceOfStalk(address account, uint256 stalk) internal {
+        AppStorage storage s = LibAppStorage.diamondStorage();
+        uint256 roots;
+        if (s.s.roots == 0) roots = stalk.mul(C.getRootsBase());
+        else roots = s.s.roots.mul(stalk).div(s.s.stalk);
+
+        s.s.stalk = s.s.stalk.add(stalk);
+        s.a[account].s.stalk = s.a[account].s.stalk.add(stalk);
+
+        s.s.roots = s.s.roots.add(roots);
+        s.a[account].roots = s.a[account].roots.add(roots);
+
+        incrementBipRoots(account, roots);
+    }
+```
+
+用户进行提案时，会对用户的roots进行检查，需满足：userRoots / totalRoots > governanceProposalThreshold。关键代码如下（0xf480ee81a54e21be47aa02d0f9e29985bc7667c4）：
+
+```solidity
+    function propose(
+        IDiamondCut.FacetCut[] calldata _diamondCut,
+        address _init,
+        bytes calldata _calldata,
+        uint8 _pauseOrUnpause
+    )
+        external
+    {
+        require(canPropose(msg.sender), "Governance: Not enough Stalk.");//check user roots
+        require(notTooProposed(msg.sender), "Governance: Too many active BIPs.");
+        require(
+            _init != address(0) || _diamondCut.length > 0 || _pauseOrUnpause > 0,
+            "Governance: Proposition is empty."
+        );
+
+        uint32 bipId = createBip(
+            _diamondCut,
+            _init,
+            _calldata,
+            _pauseOrUnpause,
+            C.getGovernancePeriod(),
+            msg.sender
+        );
+
+        s.a[msg.sender].proposedUntil = startFor(bipId).add(periodFor(bipId));
+        emit Proposal(msg.sender, bipId, season(), C.getGovernancePeriod());
+
+        _vote(msg.sender, bipId);
+    }
+    
+    function canPropose(address account) internal view returns (bool) {
+        if (totalRoots() == 0 || balanceOfRoots(account) == 0) {
+            return false;
+        }
+        Decimal.D256 memory stake = Decimal.ratio(balanceOfRoots(account), totalRoots());
+        return stake.greaterThan(C.getGovernanceProposalThreshold());// threshold is 0.1%
+    }
+    
+    function ratio(uint256 a, uint256 b)internal pure returns (D256 memory){
+        return D256({ value: getPartial(a, BASE, b) }); // BASE is 1e18
+    }
+    
+    function getPartial(uint256 target, uint256 numerator, uint256 denominator ) private pure returns (uint256){
+        return target.mul(numerator).div(denominator);
+    }
+```
+
+综上，如果一个新用户想要生成新提案的话，那么需要满足以下等式：
+
+1. userStalk = tokenAmount * tokenToStalkRatio
+2. userRoots = totalRoots * userStalk / totalRoots
+3. totalRootsNew = totalRoots + userRoots
+4. userRoots / totalRootsNew > governanceProposalThreshold
+
+经过简单推导可以得出，用户需要向协议中质押的 tokenAmount 数量需要满足：
+
+**tokenAmount > (governanceProposalThreshold * totalStalk) / (1 - governanceProposalThreshold) / tokenToStalkRatio **
+
+其中，governanceProposalThreshold为常数0.1%。
+
+提案生成后，需要Silo成员通过vote函数向提案进行投票，会将用户所拥有的所有roots全部记录在该提案中。相关代码（0xf480ee81a54e21be47aa02d0f9e29985bc7667c4）：
+
+```solidity
+    function vote(uint32 bip) external {
+        require(balanceOfRoots(msg.sender) > 0, "Governance: Must have Stalk.");
+        require(isNominated(bip), "Governance: Not nominated.");
+        require(isActive(bip), "Governance: Ended.");
+        require(!voted(msg.sender, bip), "Governance: Already voted.");
+
+        _vote(msg.sender, bip);
+    }
+    function _vote(address account, uint32 bipId) internal {
+        recordVote(account, bipId);
+        placeVotedUntil(account, bipId);
+
+        emit Vote(account, bipId, balanceOfRoots(account));
+    }
+
+    function recordVote(address account, uint32 bipId) internal {
+        s.g.voted[bipId][account] = true;
+        s.g.bips[bipId].roots = s.g.bips[bipId].roots.add(balanceOfRoots(account));
+    }
+    function placeVotedUntil(address account, uint32 bipId) internal {
+        uint32 newLock = startFor(bipId).add(periodFor(bipId));
+        if (newLock > s.a[account].votedUntil) {
+                s.a[account].votedUntil = newLock;
+        }
+    }
+```
+
+在提案投票结束并且投票后，若投票数大于结束时totalRoots，则可以通过调用commit函数来执行该提案中的内容：
+
+```solidity
+    function commit(uint32 bip) external {
+        require(isNominated(bip), "Governance: Not nominated.");
+        require(!isActive(bip), "Governance: Not ended.");
+        require(!isExpired(bip), "Governance: Expired.");
+        require(
+            endedBipVotePercent(bip).greaterThanOrEqualTo(C.getGovernancePassThreshold()), // threshold = 50%
+            "Governance: Must have majority."
+        );
+        _execute(msg.sender, bip, true, true); 
+    }
+    function endedBipVotePercent(uint32 bipId) internal view returns (Decimal.D256 memory) {
+        return Decimal.ratio(s.g.bips[bipId].roots,s.g.bips[bipId].endTotalRoots);
+    }
+    function endBip(uint32 bipId) internal {
+        uint256 i = 0;
+        while(s.g.activeBips[i] != bipId) i++;
+        s.g.bips[bipId].timestamp = uint128(block.timestamp);
+        s.g.bips[bipId].endTotalRoots = totalRoots();
+        uint256 numberOfActiveBips = s.g.activeBips.length-1;
+        if (i < numberOfActiveBips) s.g.activeBips[i] = s.g.activeBips[numberOfActiveBips];
+        s.g.activeBips.pop();
+    }
+    
+```
+
+执行提案中的代码是通过调用\_execute函数完成，具体调用链为：\_execute -> cutBip -> diamondCut -> initializeDiamondCut -> \_init.delegatecall(_calldata)
+
+其中\_init 和_calldata 为提案创建时传入的参数。
+
+```solidity
+    function _execute(address account, uint32 bip, bool ended, bool cut) private {
+        if (!ended) endBip(bip);
+        s.g.bips[bip].executed = true;
+
+        if (cut) cutBip(bip);
+        pauseOrUnpauseBip(bip);
+
+        incentivize(account, ended, bip, C.getCommitIncentive());
+        emit Commit(account, bip);
+    }
+    function cutBip(uint32 bipId) internal {
+        if (diamondCutIsEmpty(bipId)) return;
+        LibDiamond.diamondCut(
+            s.g.diamondCuts[bipId].diamondCut,
+            s.g.diamondCuts[bipId].initAddress,
+            s.g.diamondCuts[bipId].initData
+        );
+    }
+    function diamondCut(
+        IDiamondCut.FacetCut[] memory _diamondCut,
+        address _init,
+        bytes memory _calldata
+    ) internal {
+        for (uint256 facetIndex; facetIndex < _diamondCut.length; facetIndex++) {
+            IDiamondCut.FacetCutAction action = _diamondCut[facetIndex].action;
+            if (action == IDiamondCut.FacetCutAction.Add) {
+                addFunctions(_diamondCut[facetIndex].facetAddress, _diamondCut[facetIndex].functionSelectors);
+            } else if (action == IDiamondCut.FacetCutAction.Replace) {
+                replaceFunctions(_diamondCut[facetIndex].facetAddress, _diamondCut[facetIndex].functionSelectors);
+            } else if (action == IDiamondCut.FacetCutAction.Remove) {
+                removeFunctions(_diamondCut[facetIndex].facetAddress, _diamondCut[facetIndex].functionSelectors);
+            } else {
+                revert("LibDiamondCut: Incorrect FacetCutAction");
+            }
+        }
+        emit DiamondCut(_diamondCut, _init, _calldata);
+        initializeDiamondCut(_init, _calldata);
+    }
+    function initializeDiamondCut(address _init, bytes memory _calldata) internal {
+        if (_init == address(0)) {
+            require(_calldata.length == 0, "LibDiamondCut: _init is address(0) but_calldata is not empty");
+        } else {
+            require(_calldata.length > 0, "LibDiamondCut: _calldata is empty but _init is not address(0)");
+            if (_init != address(this)) {
+                enforceHasContractCode(_init, "LibDiamondCut: _init address has no code");
+            }
+            (bool success, bytes memory error) = _init.delegatecall(_calldata);
+            if (!success) {
+                if (error.length > 0) {
+                    // bubble up the error
+                    revert(string(error));
+                } else {
+                    revert("LibDiamondCut: _init function reverted");
+                }
+            }
+        }
+    }
+```
+
+### 漏洞成因
+
+除了上面提到的commit函数可以执行提案逻辑之外，Silo为了应对突发事件实现了emergencyCommit函数，允许提案生成时间超过24小时并且投票数占比超过2/3的提案在投票期结束前直接执行，并且由于上文提到的执行方式是delegatecall调用，所以攻击者完全可以在提案生成24小时后运用闪电贷强制执行恶意提案逻辑转走协议内其他用户质押的资产。
+
+```solidity
+    function emergencyCommit(uint32 bip) external {
+        require(isNominated(bip), "Governance: Not nominated.");
+        require(
+            block.timestamp >= timestamp(bip).add(C.getGovernanceEmergencyPeriod()),//86400 = 24hrs
+            "Governance: Too early.");
+        require(isActive(bip), "Governance: Ended.");
+        require(
+            bipVotePercent(bip).greaterThanOrEqualTo(C.getGovernanceEmergencyThreshold()),//2/3
+            "Governance: Must have super majority."
+        );
+        _execute(msg.sender, bip, false, true); 
+    }
+```
+
+
 
 ## 分析
 
@@ -68,7 +310,7 @@ contract InitBip18 {
 
 即设置BIP18的init地址为TrueBIP18，初始化函数参数为init()函数签名。
 
-4. 发起BIP19提案，调用参数如下：
+4. 发起BIP19提案（障眼法），调用参数如下：
 
 ```json
 {
@@ -81,10 +323,10 @@ contract InitBip18 {
 
 BIP19init地址为FakeBIP18，调用参数同样为init()函数签名。
 
-5. 向TrueBIP18地址转入0.25ETH。
+5. 向TrueBIP18地址转入0.25ETH。（障眼法）
 
 6. 等待一天，满足emergencyCommit时间要求。
-7. 创建TrueBIP18合约。
+7. 通过 create2 创建TrueBIP18合约。
 8. 通过闪电贷获得大量BEAN，满足emergencyCommit的票数要求，强制使得BIP18通过并执行。
 9. 由于调用BIP是通过delegatecall方式，攻击者的攻击代码将协议内的资产全部转走。
 
