@@ -4,7 +4,7 @@
 
 4月17日，ETH 上稳定币协议 Beanstalk Farm 遭到闪电贷攻击，项目方损失约 8000万美元。
 
-Beanstalk 协议中的提案管理合约 GovernanceFacet.emergencyCommit 函数可以立即执行投票通过且提案时间大于一天的提案，执行过程中会以 GovernanceFacet 的身份执行提案合约的 init 函数（delegatecall）。
+Beanstalk 协议中的提案管理合约 GovernanceFacet.emergencyCommit 函数可以在提案投票结束前立即执行投票占比大于2/3且创建时间大于一天的提案，执行过程中会以 GovernanceFacet 的身份执行提案合约的 init 函数（delegatecall）。
 
 攻击者首先在攻击发生一天前部署设置了一个恶意提案，其初始化函数会将 Beanstalk 协议内的资金转出到攻击合约地址，在攻击发生当天通过闪电贷取得足够多的投票代币使得该提案通过。由于提案通过时会以 delegatecall 调用对应合约的 init 函数，所以攻击者可以凭借这一漏洞偷走项目内资金。
 
@@ -21,7 +21,7 @@ Silo 白名单包括：
 
 用户向协议中质押白名单中的代币会根据不同的计算公式获得对应数量的 Stalk（Silo 治理代币），并且记录用户所拥有的Stalk在当前项目总质押代币中的相应占比。具体计算公式见项目白皮书：https://bean.money/docs/beanstalk.pdf
 
-在用户得到Stalk的同时也会得到对应的roots，计算公式为：roots = totalRoots * stalk / totalStalk ，而后将用户产生的roots累加到rootsSum中。代码如下（0x448d330affa0ad31264c2e6a7b5d2bf579608065）：
+在用户得到Stalk的同时也会得到对应的roots，计算公式为：roots = totalRoots * stalk / totalStalk ，而后将用户产生的roots累加到totalRoots中。代码如下（0x448d330affa0ad31264c2e6a7b5d2bf579608065）：
 
 ```solidity
     function incrementBalanceOfStalk(address account, uint256 stalk) internal {
@@ -246,15 +246,19 @@ Silo 白名单包括：
 
 
 
-## 分析
+## 攻击流程细节
 
-### 攻击流程地址与交易信息
+### 攻击者地址
 
-攻击者地址：[0x1c5dcdd006ea78a7e4783f9e6021c32935a10fb4](https://etherscan.io/address/0x1c5dcdd006ea78a7e4783f9e6021c32935a10fb4)
+[0x1c5dcdd006ea78a7e4783f9e6021c32935a10fb4](https://etherscan.io/address/0x1c5dcdd006ea78a7e4783f9e6021c32935a10fb4)
 
-恶意提案地址：[Create: InitBip18](https://etherscan.io/address/0x259a2795624b8a17bc7eb312a94504ad0f615d1e)（不是真正的BIP18，以下称之为 FakeBIP18）
+### 攻击合约地址
 
-[0xe5ecf73603d98a0128f05ed30506ac7a663dbb69 ](https://etherscan.io/address/0xe5ecf73603d98a0128f05ed30506ac7a663dbb69)（真正的恶意提案BIP18地址，为FakeBIP18的proposer地址，以下称之为True BIP8）
+伪造提案地址：[Create: InitBip18](https://etherscan.io/address/0x259a2795624b8a17bc7eb312a94504ad0f615d1e)（不是真正的BIP18，为攻击者部署的混淆视听的正常提案，其BIP编号为19，以下称之为 FakeBIP18）
+
+恶意提案地址：[0xe5ecf73603d98a0128f05ed30506ac7a663dbb69 ](https://etherscan.io/address/0xe5ecf73603d98a0128f05ed30506ac7a663dbb69)（真正的恶意提案BIP18地址，为FakeBIP18的proposer地址，以下称之为True BIP8）
+
+### 攻击相关hash
 
 进行BIP18提案交易hash：[0x68cdec0ac76454c3b0f7af0b8a3895db00adf6daaf3b50a99716858c4fa54c6f](https://etherscan.io/tx/0x68cdec0ac76454c3b0f7af0b8a3895db00adf6daaf3b50a99716858c4fa54c6f)（TrueBIP18）
 
@@ -266,7 +270,7 @@ Silo 白名单包括：
 
 ### 攻击流程分析
 
-1. 用ETH购买一定数量满足发起提案的BEAN，将其质押在协议中。
+1. 用ETH购买一定数量满足发起提案的BEAN，将其质押在协议中获得Stalk。
 
 2. 创建FakeBIP18合约，合约代码如下：
 
@@ -323,26 +327,24 @@ contract InitBip18 {
 
 BIP19init地址为FakeBIP18，调用参数同样为init()函数签名。
 
-5. 向TrueBIP18地址转入0.25ETH。（障眼法）
+5. 向TrueBIP18地址转入0.25ETH。（攻击者进行这一操作目的为将TrueBIP18地址伪装成EOA地址，即FakeBIP18中的Proposer Wallet）
 
 6. 等待一天，满足emergencyCommit时间要求。
 7. 通过 create2 创建TrueBIP18合约。
-8. 通过闪电贷获得大量BEAN，满足emergencyCommit的票数要求，强制使得BIP18通过并执行。
+8. 通过闪电贷获得大量Stalk，满足emergencyCommit的票数要求，强制使得BIP18通过并执行。
 9. 由于调用BIP是通过delegatecall方式，攻击者的攻击代码将协议内的资产全部转走。
-
-
 
 ### 一些问题
 
-1. 为什么创建FakeBIP？
+1. 为什么创建FakeBIP以及提前向TrueBIP18地址转账？
 
-   答：通过复现和代码分析，完全可以越过这一步，仅仅为攻击者障眼法。
+   答：通过复现和代码分析，完全可以越过这两步，为攻击者障眼法迷惑其他DAO成员。
 
 2. 为什么最后攻击的时候要用创建合约的方式在构造函数中调用？是否有EOA限制？
 
-   答：无限制，不清楚为什么攻击者要用这种形式进行攻击利用，在复现过程中并没有使用在构造函数调用的方式依然复现成功。
+   答：无限制，在复现过程中并没有使用在构造函数调用的方式依然复现成功，尚不明确为什么攻击者要用这种形式进行攻击利用。
 
-## 复现
+## 攻击流程复现
 
 攻击合约：
 
@@ -681,6 +683,4 @@ weth: 9875
 
 ## 总结
 
-虽然大多数DeFi项目方都会自废武功将项目的管理权以币圈信仰——去中心化的形式稀释，但是实际上DAO和多签并不能完全代表项目的安全。
-
-唯票数论的投票形式在闪电贷攻击面前形同虚设，可以考虑在投票通过和执行放在两个区块内分别实施，以此来规避闪电贷的风险。
+涉及项目治理投票的关键操作如果唯票数论就违背了其社区治理的初衷，并且在闪电贷攻击面前投票代币数量条件也是形同虚设。类似的 emergencyCommit 接口实现时可以考虑将投票和执行操作拆分，在两个区块高度内分别完成，以此抵御闪电贷攻击。
