@@ -347,7 +347,7 @@ BIP19 \_init 地址为FakeBIP18，调用参数同样为 init() 函数签名，�
 
 Uniswap 中具体 Bean 存量如下（交易 hash：0xfdd9acbc3fae083d572a2b178c8ca74a63915841a8af572a10d0055dbe91d219）：
 
-![image-20220511144139975](https://github.com/s3cunDa/s3cunDa.github.io/assets/post/image-20220511144139975.png)
+![image-20220511144139975](https://s3cunDa.github.io/assets/post/image-20220511144139975.png)
 
 不过 Silo 白名单中不仅仅只有 Bean 一种 token 可以进行质押换取 Stalk，攻击者采用闪电贷借出大量的 DAI、USDT、USDC、Bean、LUSD，将这些代币通过在交易所中兑换统一置换为BEAN:3CRV Curve LP Tokens，达成条件。
 
@@ -392,7 +392,7 @@ function init() public{
 
 攻击者完成攻击和闪电贷还款流程后，将所有攻击所得在 DEX 内换为 ETH，最终获利24830个ETH。
 
-![image-20220511154924377](https://github.com/s3cunDa/s3cunDa.github.io/assets/post/image-20220511154924377.png)
+![image-20220511154924377](https://s3cunDa.github.io/assets/post/image-20220511154924377.png)
 
 ### 攻击复现
 
