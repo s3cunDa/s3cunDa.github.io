@@ -28,7 +28,7 @@ key: page-about
 
 ID: s3cunda
 
-NUDT -> XTU -> UACS@IIE
+NUDT -> XTU -> UCAS@IIE
 
 NeSE ctf player, pwn & block chain
 
