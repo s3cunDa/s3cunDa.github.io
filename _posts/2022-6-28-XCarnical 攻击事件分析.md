@@ -1,4 +1,4 @@
-# XCarnical 攻击事件分析与复现
+# XCarnical 攻击事件分析
 
 ## 事件概述
 
