@@ -32,7 +32,7 @@ NUDT -> XTU -> UCAS@IIE
 
 NeSE ctf player, pwn & block chain
 
-Cobo Blockchain Security Engineer Intern
+Previous Cobo Blockchain Security Engineer Intern
 
 WeChat ID: zmm190308
 
